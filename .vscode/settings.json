@@ -1,0 +1,11 @@
+{
+    "C_Cpp.dimInactiveRegions": false,
+    "C_Cpp.errorSquiggles": "disabled",
+    "files.associations": {
+        "conversions.h": "c",
+        "params.h": "c",
+        "randombytes.h": "c",
+        "fips202.h": "c",
+        "externalfunctions.h": "c"
+    }
+}
