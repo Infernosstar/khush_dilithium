@@ -5,14 +5,125 @@
 #include "externalfunctions.h"
 #include "Conversions.h"
 #include <stdio.h>
+static void SimpleBitUnpack(int32_t *poly, const uint8_t *bytes, int bitlen) {
+    int offset = 0;
+    for (int i = 0; i < 256; i++) {
+        poly[i] = 0;
+        for (int j = 0; j < bitlen; j++) {
+            if (bytes[offset / 8] & (1 << (offset % 8))) {
+                poly[i] |= (1 << j);
+            }
+            offset++;
+        }
+    }
+}
 
+// Algorithm 23: pkDecode
+void pkDecode(const uint8_t *pk, uint8_t *rho, int32_t t1[ML_K][256]) {
+    // Step 1: Extract ρ and z_i components from public key
+    memcpy(rho, pk, SEEDBYTES); // ρ is first 32 bytes
+    
+    // Each t1 polynomial is packed in 32*(bitlen(q-1)-d) bits
+    int bitlen = BITLEN_Q_MINUS_1 - D;
+    int bytes_per_poly = (256 * bitlen + 7) / 8;
+    
+    // Step 2-4: Unpack each t1 polynomial
+    for (int i = 0; i < ML_K; i++) {
+        const uint8_t *z_i = pk + SEEDBYTES + i * bytes_per_poly;
+        SimpleBitUnpack(t1[i], z_i, bitlen);
+    }
+}
+
+// Helper function for signature decoding
+static void BitUnpack(int32_t *poly, const uint8_t *bytes, int a, int b) {
+    int range = a + b;
+    int bitlen = 0;
+    while ((1 << bitlen) <= range) bitlen++;
+    
+    int offset = 0;
+    for (int i = 0; i < 256; i++) {
+        poly[i] = 0;
+        for (int j = 0; j < bitlen; j++) {
+            if (bytes[offset / 8] & (1 << (offset % 8))) {
+                poly[i] |= (1 << j);
+            }
+            offset++;
+        }
+        // Map from [0, a+b] to [-a, b]
+        poly[i] -= a;
+    }
+}
+
+// Helper function to unpack hints
+static void HintBitUnpack(const uint8_t *y, int32_t h[ML_K][256]) {
+    // Initialize all hints to 0
+    for (int i = 0; i < ML_K; i++) {
+        for (int j = 0; j < 256; j++) {
+            h[i][j] = 0;
+        }
+    }
+    
+    int index = 0;
+    for (int i = 0; i < ML_K; i++) {
+        // Read omega_i (number of non-zero hints for this polynomial)
+        int omega_i = y[OMEGA + i];
+        
+        // Mark the specified positions as 1
+        for (int j = index; j < omega_i; j++) {
+            int pos = y[j];
+            if (pos < 256) {  // Safety check
+                h[i][pos] = 1;
+            }
+        }
+        index = omega_i;
+    }
+}
+
+// Algorithm 27: sigDecode
+int sigDecode(const uint8_t *sigma, uint8_t *c_tilde, int32_t z[ML_L][256], int32_t h[ML_K][256]) {
+    // Step 1: Extract components from signature
+    // c_tilde is first 32 bytes (λ/4 bits where λ=256)
+    memcpy(c_tilde, sigma, 32);
+    
+    // Each z polynomial is packed in 32*(1+bitlen(γ1-1)) bytes
+    int bitlen_z = 1 + BITLEN_GAMMA1_MINUS_1;
+    int bytes_per_z_poly = (256 * bitlen_z + 7) / 8;
+    
+    // Step 2-4: Unpack each z polynomial
+    for (int i = 0; i < ML_L; i++) {
+        const uint8_t *x_i = sigma + 32 + i * bytes_per_z_poly;
+        BitUnpack(z[i], x_i, GAMMA1 - 1, GAMMA1);
+    }
+    
+    // Step 5: Unpack hints
+    const uint8_t *y = sigma + 32 + ML_L * bytes_per_z_poly;
+    HintBitUnpack(y, h);
+    
+    // Check if hints were properly encoded
+    int hint_count = 0;
+    for (int i = 0; i < ML_K; i++) {
+        for (int j = 0; j < 256; j++) {
+            hint_count += h[i][j];
+        }
+    }
+    
+    // If hint count exceeds ω, return error
+    if (hint_count > OMEGA) {
+        return -1;
+    }
+    
+    return 0;
+}
 // Function to verify a signature
-int ml_dsa_verify_internal(const uint8_t *pk, const uint8_t *M_prime, size_t M_prime_len, const uint8_t *sigma) {
    int ml_dsa_verify_internal(const uint8_t *pk, const uint8_t *M_prime, size_t M_prime_len, const uint8_t *sigma) {
+    // Step 1: Decode public key
+  int ml_dsa_verify_internal(const uint8_t *pk, const uint8_t *M_prime,
+                          size_t M_prime_len, keccak_state *state,
+                          const uint8_t *sigma) {
     // Step 1: Decode public key
     uint8_t rho[SEEDBYTES];
     int32_t t1[ML_K][256];
-    pkDecode(pk, rho, t1);
+    pkDecode(pk, rho, t1, state);
 
     // Step 2: Decode signature
     uint8_t c_tilde[32];
@@ -129,25 +240,17 @@ int ml_dsa_verify_internal(const uint8_t *pk, const uint8_t *M_prime, size_t M_p
     return 1; // Signature is valid
 }
 
-// Wrapper function that formats the message before verification
 int ml_dsa_verify(const uint8_t *pk, const uint8_t *M, size_t M_len,
-                 const uint8_t *tx, size_t tx_len, const uint8_t *sigma) {
-    // Check context length
-    if (tx_len > 255) {
-        return 0;
-    }
-
-    // Format M′ = (0 || tx_len || tx || M)
-    size_t M_prime_len = 2 + tx_len + M_len;
+                 keccak_state *state, const uint8_t *sigma) {
+    // ML-DSA doesn't use tx/tx_len - format M′ as (0 || M)
+    size_t M_prime_len = 1 + M_len;
     uint8_t *M_prime = (uint8_t *)malloc(M_prime_len);
     if (!M_prime) return 0;
 
-    M_prime[0] = 0;
-    M_prime[1] = (uint8_t)tx_len;
-    memcpy(M_prime + 2, tx, tx_len);
-    memcpy(M_prime + 2 + tx_len, M, M_len);
+    M_prime[0] = 0;  // Single byte prefix
+    memcpy(M_prime + 1, M, M_len);
 
-    int result = ml_dsa_verify_internal(pk, M_prime, M_prime_len, sigma);
+    int result = ml_dsa_verify_internal(pk, M_prime, M_prime_len, state, sigma);
     free(M_prime);
     return result;
 }

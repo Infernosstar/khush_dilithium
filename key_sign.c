@@ -251,7 +251,7 @@ void pointwise_mul(int32_t *res, const int32_t *a, const int32_t *b)
     }
 }
 int sign_internal(const uint8_t *sk, const uint8_t *M_dash, size_t M_len,
-                  const uint8_t rnd[32], uint8_t *sigma) {
+                  const uint8_t rnd[32], keccak_state ctx,uint8_t *sigma) {
     // Step 1: Decode private key
     uint8_t rho[SEEDBYTES], K[SEEDBYTES], tr[CRHBYTES];
     int32_t s1[ML_L][256], s2[ML_K][256], t0[ML_K][256];
@@ -269,7 +269,7 @@ int sign_internal(const uint8_t *sk, const uint8_t *M_dash, size_t M_len,
     expandA(rho, A_hat);
 
     // Step 4: Compute μ = H(tr || M′)
-    uint8_t mu[64];
+     uint8_t mu[64];
     {
         uint8_t tr_bits[CRHBYTES * 8];
         BytesToBits(tr, CRHBYTES, tr_bits);
@@ -277,10 +277,9 @@ int sign_internal(const uint8_t *sk, const uint8_t *M_dash, size_t M_len,
         memcpy(input, tr_bits, CRHBYTES * 8);
         memcpy(input + CRHBYTES * 8, M_dash, M_len);
         
-        keccak_state state;
-        shake256_init(&state);
-        shake256_absorb(&state, input, CRHBYTES * 8 + M_len);
-        shake256_squeeze(mu, 64, &state);
+        shake256_init(ctx);
+        shake256_absorb(ctx, input, CRHBYTES * 8 + M_len);
+        shake256_squeeze(ctx, mu, 64);
     }
 
     // Step 5: Compute ρ′′ = H(K || rnd || μ)
@@ -291,10 +290,9 @@ int sign_internal(const uint8_t *sk, const uint8_t *M_dash, size_t M_len,
         memcpy(input + SEEDBYTES, rnd, 32);
         memcpy(input + SEEDBYTES + 32, mu, 64);
         
-        keccak_state state;
-        shake256_init(&state);
-        shake256_absorb(&state, input, SEEDBYTES + 32 + 64);
-        shake256_squeeze(rho_prime_prime, 64, &state);
+        shake256_init(ctx);
+        shake256_absorb(ctx, input, SEEDBYTES + 32 + 64);
+        shake256_squeeze(ctx, rho_prime_prime, 64);
     }
 
     // Step 6: Rejetion sampling loop
@@ -422,37 +420,23 @@ int o=0;*/
    
 }
 int ml_dsa_sign(const uint8_t *sk, const uint8_t *M, size_t M_len, 
-            keccak_state * ctx, uint8_t *sigma) {
-    // Step 1: Check context length
-   /* if (tx_len > 255) {
-
-        printf("the length of context is too long\n");
-        return -1; // Error: context too long
-    }*/
-
-    // Step 2: Generate random bytes (for randomized variant)
+                keccak_state *ctx, uint8_t *sigma) {
+    // Step 1: Generate random bytes (for randomized variant)
     uint8_t rnd[32];
     randombytes(rnd, 32);
     
-    // For deterministic variant, use all zeros instead:
-    // memset(rnd, 0, 32);
-
-    // Step 3: Format M′
-    size_t M_prime_len = 2 + tx_len + M_len;
+    // Step 2: Format M′ as (0 || M)
+    size_t M_prime_len = 1 + M_len;
     uint8_t *M_prime = (uint8_t *)malloc(M_prime_len);
     if (!M_prime) return -1;
 
-    // First byte: 0 (as integer)
+    // Single byte prefix (0)
     M_prime[0] = 0;
-    // Second byte: tx length
-    M_prime[1] = (uint8_t)tx_len;
-    // Context bytes
-    memcpy(M_prime + 2, tx, tx_len);
     // Message bytes
-    memcpy(M_prime + 2 + tx_len, M, M_len);
+    memcpy(M_prime + 1, M, M_len);
 
-    // Step 4: Call internal signing funtion
-    int ret = sign_internal(sk, M_prime, M_prime_len, rnd, sigma);
+    // Step 3: Call internal signing function
+    int ret = sign_internal(sk, M_prime, M_prime_len, rnd, ctx, sigma);
 
     free(M_prime);
     return ret;
