@@ -242,12 +242,13 @@ int sign_internal(const uint8_t *sk, const uint8_t *M_dash, size_t M_len,
     // Compute μ = H(tr || M′) using proper sponge
     uint8_t mu[64];
     {
-        uint8_t input[CRHBYTES + M_len + 1]; // +1 for safe padding
-        memcpy(input, tr, CRHBYTES);
-        memcpy(input + CRHBYTES, M_dash, M_len);
+        // uint8_t input[CRHBYTES + M_len + 1]; // +1 for safe padding
+        // memcpy(input, tr, CRHBYTES);
+        // memcpy(input + CRHBYTES, M_dash, M_len);
         
         shake256_init(ctx);
-        shake256_absorb(ctx, input, CRHBYTES + M_len);
+        shake256_absorb(ctx, tr, CRHBYTES);
+        shake256_absorb(ctx, M_dash, M_len);
         shake256_finalize(ctx);
         shake256_squeeze(mu, 64, ctx);
     }
@@ -263,7 +264,7 @@ int sign_internal(const uint8_t *sk, const uint8_t *M_dash, size_t M_len,
         shake256_init(ctx);
         shake256_absorb(ctx, K,SEEDBYTES);
         shake256_absorb(ctx, rnd, 32);
-        shake256_absorb(ctx,mu,64)
+        shake256_absorb(ctx,mu,64);
         shake256_finalize(ctx);
         shake256_squeeze(rho_prime_prime, 64, ctx);
     }
