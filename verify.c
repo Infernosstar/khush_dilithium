@@ -5,6 +5,9 @@
 #include "externalfunctions.h"
 #include "Conversions.h"
 #include <stdio.h>
+#include <stdlib.h>
+#include "key_sign.h"
+#include "key_gen.h"
 static void SimpleBitUnpack(int32_t *poly, const uint8_t *bytes, int bitlen) {
     int offset = 0;
     for (int i = 0; i < 256; i++) {
@@ -211,7 +214,7 @@ int sigDecode(const uint8_t *sigma, uint8_t *c_tilde, int32_t z[ML_L][256], int3
     UseHint(h, w_approx_prime, w1_prime);
 
     // Step 12: Compute c_tilde' = H(μ || w1Encode(w1'), λ/4)
-    uint8_t w1_encoded[ML_K * ((256 * (BITLEN_GAMMA1 * 2) + 7) / 8];
+    uint8_t w1_encoded[ML_K * ((256 * (BITLEN_GAMMA1 * 2) + 7) / 8)];
     w1Encode(w1_encoded, w1_prime);
     
     uint8_t c_tilde_prime[32];
@@ -253,4 +256,4 @@ int ml_dsa_verify(const uint8_t *pk, const uint8_t *M, size_t M_len,
     int result = ml_dsa_verify_internal(pk, M_prime, M_prime_len, state, sigma);
     free(M_prime);
     return result;
-}
+}}

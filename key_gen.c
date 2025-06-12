@@ -9,7 +9,6 @@
 #include "key_gen.h"
 
 void keygen(uint8_t *pk, uint8_t *sk) {
-   // printf("reached rthis function");
     // Key generation variables
     uint8_t xi[SEEDBYTES];
     uint8_t rho[SEEDBYTES], rhoprime[CRHBYTES], key[SEEDBYTES];
@@ -23,32 +22,43 @@ void keygen(uint8_t *pk, uint8_t *sk) {
     // 1. Generate random seed
     randombytes(xi, SEEDBYTES);
     
-    // 2. Expand seed (H(xi||k||l, 128))
-    uint8_t input[SEEDBYTES+2];
-    memcpy(input, xi, SEEDBYTES);
-    input[SEEDBYTES] = ML_K;
-    input[SEEDBYTES+1] = ML_L;
+    // 2. Expand seed using SHAKE256 with proper domain separation
+    keccak_state state;
+    shake256_init(&state);
     
-    uint8_t output[128];
-    shake128(output, 128, input, SEEDBYTES+2);
-    memcpy(rho, output, SEEDBYTES);
-    memcpy(rhoprime, output+SEEDBYTES, CRHBYTES);
-    memcpy(key, output+SEEDBYTES+CRHBYTES, SEEDBYTES);
+    // Absorb all seed material with proper padding
+    uint8_t domain_sep[2] = {ML_K, ML_L};
+    shake256_absorb(&state, xi, SEEDBYTES);
+    shake256_absorb(&state, domain_sep, 2);
+    shake256_finalize(&state);
+    
+    // Squeeze all required material at once
+    uint8_t squeezed[(SEEDBYTES + CRHBYTES + SEEDBYTES)];
+    shake256_squeeze(squeezed, sizeof(squeezed), &state);
+    
+    // Split the squeezed output without reinitializing
+    memcpy(rho, squeezed, SEEDBYTES);
+    memcpy(rhoprime, squeezed + SEEDBYTES, CRHBYTES);
+    memcpy(key, squeezed + SEEDBYTES + CRHBYTES, SEEDBYTES);
     
     // 3. Generate matrix A
     expandA(rho, A);
     
-    // 4. Generate secret vectors
-    uint8_t s_seed[(SEEDBYTES<<1)+2];
-    memcpy(s_seed, rhoprime, SEEDBYTES<<1);
-    expandS(s_seed, (int32_t *)s1, (int32_t *)s2);
+    // 4. Generate secret vectors s1, s2
+    keccak_state s_state;
+    shake256_init(&s_state);
+    shake256_absorb(&s_state, rhoprime, CRHBYTES);
+    shake256_finalize(&s_state);
     
-    // 5. Compute t = As1 + s2
+    uint8_t s_seed_expanded[(SEEDBYTES<<1)+2];
+    shake256_squeeze(s_seed_expanded, sizeof(s_seed_expanded), &s_state);
+    expandS(s_seed_expanded, (int32_t *)s1, (int32_t *)s2);
+    
+    // 5. Compute t = A*s1 + s2
     for (int i = 0; i < ML_K; i++) {
         for (int j = 0; j < 256; j++) {
             t[i][j] = 0;
             for (int k = 0; k < ML_L; k++) {
-                // Multiply A[i][k] with s1[k] using NTT
                 int32_t temp[256];
                 NTT(s1[k]);
                 for (int l = 0; l < 256; l++) {
@@ -70,9 +80,19 @@ void keygen(uint8_t *pk, uint8_t *sk) {
     
     // 7. Encode keys
     pkEncode(pk, rho, t1);
-    shake128(tr, CRHBYTES, pk, PKBYTES);
+    
+    // Compute tr = SHAKE256(pk) with proper finalization
+    shake256_init(&state);
+    shake256_absorb(&state, pk, PKBYTES);
+    shake256_finalize(&state);
+    shake256_squeeze(tr, CRHBYTES, &state);
+    
     skEncode(sk, rho, key, tr, s1, s2, t0);
     
-    printf("Public key generated (%d bytes)\n", PKBYTES);
-    printf("Secret key generated (%d bytes)\n", SKBYTES);
+    // Debug output to verify no leading zeros
+   /* printf("Public key (first 32 bytes): ");
+    for (int i = 0; i < 32; i++) printf("%02x", pk[i]);
+    printf("\nSecret key (first 32 bytes): ");
+    for (int i = 0; i < 32; i++) printf("%02x", sk[i]);
+    printf("\n");*/
 }

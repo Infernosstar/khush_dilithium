@@ -40,7 +40,7 @@ void expandA(uint8_t rho[SEEDBYTES], int32_t (*A)[ML_L][256]) {
     for(uint8_t r = 0; r < ML_K; r++) {
         for(uint8_t s = 0; s < ML_L; s++) {
              IntegerToBytes(s,1,rho_dash + SEEDBYTES);
-            IntegerToBytes(s,1,rho_dash + SEEDBYTES+1);
+            IntegerToBytes(r,1,rho_dash + SEEDBYTES+1);
             RejNttPoly(rho_dash, A[r][s]);
         }
     }

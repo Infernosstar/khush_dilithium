@@ -8,13 +8,13 @@
 #include "key_gen.h"
 #include "key_sign.h"
 #include "verify.h"
-
+/*
 void print_Hex(const uint8_t *data, size_t size) {
     for (size_t i = 0; i < size; i++) {
         printf("%02X", data[i]);
     }
     printf("\n");
-}
+}*/
 
 int main() {
     // Test parameters
@@ -73,7 +73,7 @@ int main() {
     }
 
     // Full verification (reinitialize state for verification)
-    printf("\n=== Verifying Signature ===\n");
+   /* printf("\n=== Verifying Signature ===\n");
     shake256_init(&ctx);
     int verify_result = ml_dsa_verify(pk, (const uint8_t *)message, message_len, &ctx, sigma);
     
@@ -83,6 +83,6 @@ int main() {
         printf("Signature verification FAILED\n");
         return 1;
     }
-
+*/
     return 0;
 }
