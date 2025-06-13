@@ -1,13 +1,14 @@
-#include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
-#include "randombytes.h"
-#include "fips202.h"
-#include "externalfunctions.h"
+#include <stdlib.h>  // Added for malloc and free
+#include "key_sign.h"
 #include "params.h"
 #include "key_gen.h"
-#include "key_sign.h"
+#include "externalfunctions.h"
+// Forward declaration of BitPack from key_sign.c
+// void BitPack(uint8_t *output, const int32_t w[256], int32_t a, int32_t b);
+
 // Helper function to compute bit length (copied from key_sign.c)
 int compute_bitlen(int value) {
     int bitlen = 0;
@@ -71,94 +72,57 @@ int compare_poly_2d(int32_t a[][256], int32_t b[][256], int rows) {
     }
     return 1;
 }
-void keygen(uint8_t *pk, uint8_t *sk) {
-    // Key generation variables
-    uint8_t xi[SEEDBYTES];
-    uint8_t rho[SEEDBYTES], rhoprime[CRHBYTES], key[SEEDBYTES];
-    uint8_t tr[CRHBYTES];
-    
-    // Polynomial arrays
-    int32_t A[ML_K][ML_L][256];
-    int32_t s1[ML_L][256], s2[ML_K][256];
-    int32_t t[ML_K][256], t1[ML_K][256], t0[ML_K][256];
-    
-    // 1. Generate random seed
-    randombytes(xi, SEEDBYTES);
-    
-    // 2. Expand seed using SHAKE256 with proper domain separation
-    keccak_state state;
-    shake256_init(&state);
-    
-    // Absorb all seed material with proper padding
-    uint8_t domain_sep[2] = {ML_K, ML_L};
-    shake256_absorb(&state, xi, SEEDBYTES);
-    shake256_absorb(&state, domain_sep, 2);
-    shake256_finalize(&state);
-    
-    // Squeeze all required material at once
-    uint8_t squeezed[(SEEDBYTES + CRHBYTES + SEEDBYTES)];
-    shake256_squeeze(squeezed, sizeof(squeezed), &state);
-    
-    // Split the squeezed output without reinitializing
-    memcpy(rho, squeezed, SEEDBYTES);
-    memcpy(rhoprime, squeezed + SEEDBYTES, CRHBYTES);
-    memcpy(key, squeezed + SEEDBYTES + CRHBYTES, SEEDBYTES);
-    
-    // 3. Generate matrix A
-    expandA(rho, A);
-    
-    // 4. Generate secret vectors s1, s2
-    keccak_state s_state;
-    shake256_init(&s_state);
-    shake256_absorb(&s_state, rhoprime, CRHBYTES);
-    shake256_finalize(&s_state);
-    
-    uint8_t s_seed_expanded[(SEEDBYTES<<1)+2];
-    shake256_squeeze(s_seed_expanded, sizeof(s_seed_expanded), &s_state);
-    expandS(s_seed_expanded, (int32_t *)s1, (int32_t *)s2);
-    
-    // 5. Compute t = A*s1 + s2
-    for (int i = 0; i < ML_K; i++) {
+
+int main() {
+    // Sample test data initialization
+    uint8_t rho[SEEDBYTES] = {0};
+    uint8_t K[SEEDBYTES] = {0};
+    uint8_t tr[CRHBYTES] = {0};
+    int32_t s1[ML_L][256] = {{0}};
+    int32_t s2[ML_K][256] = {{0}};
+    int32_t t0[ML_K][256] = {{0}};
+
+    // Initialize sample data with some values
+    for (int i = 0; i < SEEDBYTES; i++) {
+        rho[i] = (uint8_t)(i + 1);
+        K[i] = (uint8_t)(i + 2);
+    }
+    for (int i = 0; i < CRHBYTES; i++) {
+        tr[i] = (uint8_t)(i + 3);
+    }
+    for (int i = 0; i < ML_L; i++) {
         for (int j = 0; j < 256; j++) {
-            t[i][j] = 0;
-            for (int k = 0; k < ML_L; k++) {
-                int32_t temp[256];
-                NTT(s1[k]);
-                for (int l = 0; l < 256; l++) {
-                    temp[l] = (A[i][k][l] * s1[k][l]) % Q;
-                }
-                NTT_Inverse(temp);
-                t[i][j] = (t[i][j] + temp[j]) % Q;
-            }
-            t[i][j] = (t[i][j] + s2[i][j]) % Q;
+            s1[i][j] = (i + j) % (2 * ETA + 1) - ETA;
         }
     }
-    
-    // 6. Power2Round decomposition
     for (int i = 0; i < ML_K; i++) {
         for (int j = 0; j < 256; j++) {
-            Power2Round(t[i][j], &t1[i][j], &t0[i][j]);
+            s2[i][j] = (i + j) % (2 * ETA + 1) - ETA;
+            t0[i][j] = (i + j) % ((1 << (D - 1)) - 1);
         }
     }
-    
-    // 7. Encode keys
-    pkEncode(pk, rho, t1);
-    
-    // Compute tr = SHAKE256(pk) with proper finalization
-    shake256_init(&state);
-    shake256_absorb(&state, pk, PKBYTES);
-    shake256_finalize(&state);
-    shake256_squeeze(tr, CRHBYTES, &state);
-    
-    skEncode(sk, rho, key, tr, s1, s2, t0);
-        // Decode
+
+    // Buffer for encoded secret key
+    size_t sk_len = SEEDBYTES * 2 + CRHBYTES +
+                    ML_L * ((256 * (compute_bitlen(2 * ETA)) + 7) / 8) * 2 +
+                    ML_K * ((256 * D + 7) / 8);
+    uint8_t *sk = (uint8_t *)malloc(sk_len);
+    if (!sk) {
+        printf("Memory allocation failed\n");
+        return 1;
+    }
+
+    // Encode
+    skEncode(sk,rho, K, tr, s1,s2,t0);
+
+    // Decode
     uint8_t rho_dec[SEEDBYTES];
     uint8_t K_dec[SEEDBYTES];
     uint8_t tr_dec[CRHBYTES];
     int32_t s1_dec[ML_L][256];
     int32_t s2_dec[ML_K][256];
     int32_t t0_dec[ML_K][256];
-int32_t t1_dec[ML_K][256];
+
     skDecode(sk, rho_dec, K_dec, tr_dec, s1_dec, s2_dec, t0_dec);
 
     // Compare results
@@ -167,7 +131,7 @@ int32_t t1_dec[ML_K][256];
         printf("rho mismatch\n");
         success = 0;
     }
-    if (memcmp(key, K_dec, SEEDBYTES) != 0) {
+    if (memcmp(K, K_dec, SEEDBYTES) != 0) {
         printf("K mismatch\n");
         success = 0;
     }
@@ -195,11 +159,5 @@ int32_t t1_dec[ML_K][256];
     }
 
     free(sk);
-    
-    // Debug output to verify no leading zeros
-   /* printf("Public key (first 32 bytes): ");
-    for (int i = 0; i < 32; i++) printf("%02x", pk[i]);
-    printf("\nSecret key (first 32 bytes): ");
-    for (int i = 0; i < 32; i++) printf("%02x", sk[i]);
-    printf("\n");*/
+    return success ? 0 : 1;
 }
