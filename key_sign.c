@@ -383,12 +383,13 @@ int sign_internal(const uint8_t *sk, const uint8_t *M_dash, size_t M_len,
 
 int ml_dsa_sign(const uint8_t *sk, const uint8_t *M, size_t M_len, 
                 keccak_state *ctx, uint8_t *sigma) {
+    // printf("\nsigning function started");
     uint8_t rnd[32];
     randombytes(rnd, 32);
     
     size_t M_prime_len = 1 + M_len;
-    uint8_t *M_prime = (uint8_t *)malloc(M_prime_len);
-    if (!M_prime) return -1;
+    uint8_t *M_prime ;
+    // if (!M_prime)return -1;
 
     M_prime[0] = 0;
     memcpy(M_prime + 1, M, M_len);
@@ -396,5 +397,7 @@ int ml_dsa_sign(const uint8_t *sk, const uint8_t *M, size_t M_len,
     int ret = sign_internal(sk, M_prime, M_prime_len, rnd, ctx, sigma);
 
     free(M_prime);
+    // printf("key signing returned successfully\n");
+    // fflush(stdout);
     return ret;
 }

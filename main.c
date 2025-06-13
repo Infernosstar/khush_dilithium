@@ -42,18 +42,18 @@ int main() {
     // Sign the message
     printf("\n=== Signing Message ===\n");
     printf("Message: '%s'\n", message);
-    
+    printf("key generation done");
     // Initialize the hash states
     shake256_init(&ctx);
     
     int ret = ml_dsa_sign(sk, (const uint8_t *)message, message_len, 
                         &ctx, sigma);
-    
+    printf("\n well tried");
     if (ret != 0) {
         printf("Signing failed with error %d\n", ret);
         return 1;
     }
-
+    printf("key signing done");
     printf("\nSignature (%d bytes):\n", SIGBYTES);
     print_Hex(sigma, SIGBYTES);
 
